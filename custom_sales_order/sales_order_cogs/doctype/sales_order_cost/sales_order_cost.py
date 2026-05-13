@@ -234,8 +234,6 @@ class SalesOrderCost(Document):
                 "account": settings.cogs_account,
                 "debit_in_account_currency": total_amount,
                 "credit_in_account_currency": 0,
-                "reference_type": "Sales Order",
-                "reference_name": self.sales_order,
             },
         )
 
@@ -262,8 +260,6 @@ class SalesOrderCost(Document):
                     "account": acct,
                     "debit_in_account_currency": 0,
                     "credit_in_account_currency": amount,
-                    "reference_type": "Sales Order",
-                    "reference_name": self.sales_order,
                 },
             )
 

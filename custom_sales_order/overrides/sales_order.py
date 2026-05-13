@@ -186,8 +186,6 @@ class CustomSalesOrder(SalesOrder):
                     "account": settings.cogs_account,
                     "debit_in_account_currency": total_cogs,
                     "credit_in_account_currency": 0,
-                    "reference_type": "Sales Order",
-                    "reference_name": self.name,
                 },
             )
 
@@ -217,8 +215,6 @@ class CustomSalesOrder(SalesOrder):
                             "account": acct,
                             "debit_in_account_currency": 0,
                             "credit_in_account_currency": amount,
-                            "reference_type": "Sales Order",
-                            "reference_name": self.name,
                         },
                     )
             else:
@@ -240,8 +236,6 @@ class CustomSalesOrder(SalesOrder):
                         "account": clearing_acct,
                         "debit_in_account_currency": 0,
                         "credit_in_account_currency": total_cogs,
-                        "reference_type": "Sales Order",
-                        "reference_name": self.name,
                     },
                 )
 
