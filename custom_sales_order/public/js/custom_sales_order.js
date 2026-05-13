@@ -3,7 +3,7 @@
 
 /**
  * Client-side enhancements for Sales Order — COGS indicators, preview,
- * cost line management, and JE generation.
+ * cost management, and JE generation.
  *
  * Injected globally via app_include_js; only activates on the Sales Order form.
  */
@@ -33,13 +33,14 @@ frappe.ui.form.on("Sales Order", {
             );
         }
 
-        // ── "Add Cost" button ──
+        // ── "Create Sales Order Cost" button ──
         frm.add_custom_button(
-            __("Add Cost"),
+            __("Create Sales Order Cost"),
             function () {
                 frappe.new_doc("Sales Order Cost", {
                     sales_order: frm.doc.name,
                     company: frm.doc.company,
+                    custom_order_number: frm.doc.custom_order_number || "",
                 });
             },
             __("COGS")
@@ -63,7 +64,7 @@ frappe.ui.form.on("Sales Order", {
                 frappe.confirm(
                     __(
                         "This will cancel any existing COGS Journal Entry and create a new one " +
-                        "based on the current cost lines. Continue?"
+                        "based on the current cost items. Continue?"
                     ),
                     function () {
                         frm.call("generate_cogs_je").then(function (r) {
@@ -71,14 +72,20 @@ frappe.ui.form.on("Sales Order", {
                                 frappe.show_alert({
                                     message: __(
                                         "COGS Journal Entry {0} created successfully.",
-                                        ['<a href="/app/journal-entry/' + r.message.je + '">' + r.message.je + "</a>"]
+                                        [
+                                            '<a href="/app/journal-entry/' +
+                                                r.message.je +
+                                                '">' +
+                                                r.message.je +
+                                                "</a>",
+                                        ]
                                     ),
                                     indicator: "green",
                                 });
                             } else {
                                 frappe.show_alert({
                                     message: __(
-                                        "No Journal Entry was created. Check that cost lines exist and settings are configured."
+                                        "No Journal Entry was created. Check that cost items exist and settings are configured."
                                     ),
                                     indicator: "orange",
                                 });
@@ -107,7 +114,7 @@ frappe.ui.form.on("Sales Order", {
                 title: __("Missing Actual Cost"),
                 message: __(
                     "You have marked this order as Completed but Actual Cost is zero. " +
-                    "Please add cost lines or enter the Actual Cost before saving."
+                    "Please create a Sales Order Cost with cost items before saving."
                 ),
                 indicator: "orange",
             });

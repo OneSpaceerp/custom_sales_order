@@ -15,48 +15,56 @@ frappe.ui.form.on("Sales Order Cost", {
     },
 
     sales_order: function (frm) {
-        // Auto-fetch company from the Sales Order
+        // Auto-fetch company and order number from the Sales Order
         if (frm.doc.sales_order) {
             frappe.db.get_value(
                 "Sales Order",
                 frm.doc.sales_order,
-                "company",
+                ["company", "custom_order_number"],
                 function (r) {
-                    if (r && r.company) {
-                        frm.set_value("company", r.company);
+                    if (r) {
+                        frm.set_value("company", r.company || "");
+                        frm.set_value("custom_order_number", r.custom_order_number || "");
                     }
                 }
             );
         } else {
             frm.set_value("company", "");
-            frm.set_value("payment_account", "");
+            frm.set_value("custom_order_number", "");
         }
     },
+});
 
-    mode_of_payment: function (frm) {
-        // Auto-fetch payment account from Mode of Payment Account
-        if (frm.doc.mode_of_payment && frm.doc.company) {
+// Child table events
+frappe.ui.form.on("Sales Order Cost Item", {
+    mode_of_payment: function (frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (row.mode_of_payment && frm.doc.company) {
             frappe.call({
                 method: "frappe.client.get_value",
                 args: {
                     doctype: "Mode of Payment Account",
                     filters: {
-                        parent: frm.doc.mode_of_payment,
+                        parent: row.mode_of_payment,
                         company: frm.doc.company,
                     },
                     fieldname: "default_account",
                 },
                 callback: function (r) {
                     if (r.message && r.message.default_account) {
-                        frm.set_value("payment_account", r.message.default_account);
+                        frappe.model.set_value(
+                            cdt,
+                            cdn,
+                            "payment_account",
+                            r.message.default_account
+                        );
                     } else {
-                        frm.set_value("payment_account", "");
+                        frappe.model.set_value(cdt, cdn, "payment_account", "");
                         frappe.msgprint({
                             title: __("Payment Account Not Found"),
                             message: __(
-                                "No default account configured for Mode of Payment '{0}' in company '{1}'. " +
-                                "Please set it up in the Mode of Payment master.",
-                                [frm.doc.mode_of_payment, frm.doc.company]
+                                "No default account configured for Mode of Payment '{0}' in company '{1}'.",
+                                [row.mode_of_payment, frm.doc.company]
                             ),
                             indicator: "orange",
                         });
@@ -64,7 +72,23 @@ frappe.ui.form.on("Sales Order Cost", {
                 },
             });
         } else {
-            frm.set_value("payment_account", "");
+            frappe.model.set_value(cdt, cdn, "payment_account", "");
         }
     },
+
+    amount: function (frm) {
+        _compute_total(frm);
+    },
+
+    cost_items_remove: function (frm) {
+        _compute_total(frm);
+    },
 });
+
+function _compute_total(frm) {
+    let total = 0;
+    (frm.doc.cost_items || []).forEach(function (row) {
+        total += flt(row.amount);
+    });
+    frm.set_value("total_amount", flt(total, 2));
+}

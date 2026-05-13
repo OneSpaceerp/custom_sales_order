@@ -8,15 +8,13 @@
   "field_order": [
     "naming_series",
     "sales_order",
+    "custom_order_number",
     "company",
-    "column_break_details",
-    "cost_date",
-    "mode_of_payment",
-    "payment_account",
-    "section_break_description",
-    "description",
-    "column_break_amount",
-    "amount",
+    "column_break_header",
+    "posting_date",
+    "total_amount",
+    "section_break_items",
+    "cost_items",
     "section_break_refs",
     "amended_from"
   ],
@@ -41,6 +39,16 @@
       "search_index": 1
     },
     {
+      "fieldname": "custom_order_number",
+      "fieldtype": "Data",
+      "label": "Order Number",
+      "read_only": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "search_index": 1,
+      "description": "Fetched from the Sales Order's Order Number field."
+    },
+    {
       "fieldname": "company",
       "fieldtype": "Link",
       "label": "Company",
@@ -51,57 +59,37 @@
       "in_list_view": 1
     },
     {
-      "fieldname": "column_break_details",
+      "fieldname": "column_break_header",
       "fieldtype": "Column Break"
     },
     {
-      "fieldname": "cost_date",
+      "fieldname": "posting_date",
       "fieldtype": "Date",
-      "label": "Date",
+      "label": "Posting Date",
       "reqd": 1,
-      "default": "Today",
-      "in_list_view": 1
+      "default": "Today"
     },
     {
-      "fieldname": "mode_of_payment",
-      "fieldtype": "Link",
-      "label": "Mode of Payment",
-      "options": "Mode of Payment",
-      "reqd": 1,
-      "in_list_view": 1,
-      "in_standard_filter": 1
-    },
-    {
-      "fieldname": "payment_account",
-      "fieldtype": "Link",
-      "label": "Payment Account",
-      "options": "Account",
-      "read_only": 1,
-      "description": "Auto-fetched from Mode of Payment Account for the company."
-    },
-    {
-      "fieldname": "section_break_description",
-      "fieldtype": "Section Break",
-      "label": "Cost Details"
-    },
-    {
-      "fieldname": "description",
-      "fieldtype": "Small Text",
-      "label": "Description",
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "column_break_amount",
-      "fieldtype": "Column Break"
-    },
-    {
-      "fieldname": "amount",
+      "fieldname": "total_amount",
       "fieldtype": "Currency",
-      "label": "Amount",
+      "label": "Total Amount",
       "options": "Company:company:default_currency",
-      "reqd": 1,
+      "read_only": 1,
       "in_list_view": 1,
-      "in_standard_filter": 1
+      "bold": 1,
+      "description": "Sum of all cost line amounts."
+    },
+    {
+      "fieldname": "section_break_items",
+      "fieldtype": "Section Break",
+      "label": "Cost Items"
+    },
+    {
+      "fieldname": "cost_items",
+      "fieldtype": "Table",
+      "label": "Cost Items",
+      "options": "Sales Order Cost Item",
+      "reqd": 1
     },
     {
       "fieldname": "section_break_refs",
@@ -163,6 +151,5 @@
   ],
   "sort_field": "modified",
   "sort_order": "DESC",
-  "track_changes": 1,
-  "title_field": "description"
+  "track_changes": 1
 }

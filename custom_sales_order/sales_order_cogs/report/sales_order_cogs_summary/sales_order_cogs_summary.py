@@ -6,7 +6,7 @@ Sales Order COGS Summary — Script Report.
 
 Displays each Sales Order alongside its expected/actual costs, the COGS
 that would (or has been) posted, gross profit, and margin percentage.
-Now includes cost line count from the Sales Order Cost DocType.
+Includes cost item count from the Sales Order Cost child tables.
 """
 
 import frappe
@@ -80,8 +80,8 @@ def _get_columns():
             "width": 130,
         },
         {
-            "fieldname": "cost_line_count",
-            "label": _("Cost Lines"),
+            "fieldname": "cost_item_count",
+            "label": _("Cost Items"),
             "fieldtype": "Int",
             "width": 90,
         },
@@ -169,14 +169,16 @@ def _get_data(filters):
             so.custom_cogs_journal_entry         AS cogs_je,
             (
                 SELECT COUNT(*)
-                FROM `tabSales Order Cost` soc
-                WHERE soc.sales_order = so.name
-            ) AS cost_line_count,
+                FROM `tabSales Order Cost Item` ci
+                INNER JOIN `tabSales Order Cost` sc ON sc.name = ci.parent
+                WHERE sc.sales_order = so.name
+            ) AS cost_item_count,
             (
-                SELECT COALESCE(SUM(soc.amount), 0)
-                FROM `tabSales Order Cost` soc
-                WHERE soc.sales_order = so.name
-            ) AS cost_line_total
+                SELECT COALESCE(SUM(ci.amount), 0)
+                FROM `tabSales Order Cost Item` ci
+                INNER JOIN `tabSales Order Cost` sc ON sc.name = ci.parent
+                WHERE sc.sales_order = so.name
+            ) AS cost_item_total
         FROM `tabSales Order` so
         WHERE {where_clause}
         ORDER BY so.transaction_date DESC
@@ -187,9 +189,9 @@ def _get_data(filters):
 
     data = []
     for r in rows:
-        # Use cost line total if cost lines exist, otherwise use engine calculation
-        if r.cost_line_count and r.cost_line_count > 0:
-            cogs = flt(r.cost_line_total, 2)
+        # Use cost item total if cost items exist, otherwise use engine calculation
+        if r.cost_item_count and r.cost_item_count > 0:
+            cogs = flt(r.cost_item_total, 2)
         else:
             cogs = calculate_cogs(
                 flt(r.expected_cost), flt(r.actual_cost), bool(r.is_completed)
@@ -207,7 +209,7 @@ def _get_data(filters):
                 "grand_total": revenue,
                 "expected_cost": flt(r.expected_cost, 2),
                 "actual_cost": flt(r.actual_cost, 2),
-                "cost_line_count": r.cost_line_count or 0,
+                "cost_item_count": r.cost_item_count or 0,
                 "cogs_applied": flt(cogs, 2),
                 "gross_profit": profit,
                 "margin_pct": margin_pct,
