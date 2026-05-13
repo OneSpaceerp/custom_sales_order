@@ -27,7 +27,7 @@ class SalesOrderCost(Document):
 
     def validate(self):
         """Resolve payment accounts and compute the total."""
-        self._fetch_order_number()
+        self._resolve_sales_order()
         self._resolve_payment_accounts()
         self._compute_total()
 
@@ -43,13 +43,37 @@ class SalesOrderCost(Document):
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _fetch_order_number(self):
-        """Copy the SO's custom_order_number (naming_series based) for easy filtering."""
-        if self.sales_order:
+    def _resolve_sales_order(self):
+        """If custom_order_number is set but sales_order is not, look up the SO.
+        If sales_order is set, fetch the order number from it.
+        """
+        if self.custom_order_number and not self.sales_order:
+            # Look up SO by custom_order_number
+            so_name = frappe.db.get_value(
+                "Sales Order",
+                {"custom_order_number": self.custom_order_number},
+                "name",
+            )
+            if so_name:
+                self.sales_order = so_name
+            else:
+                frappe.throw(
+                    _("No Sales Order found with Order Number '{0}'.").format(
+                        self.custom_order_number
+                    )
+                )
+        elif self.sales_order and not self.custom_order_number:
+            # Fetch order number from SO
             order_number = frappe.db.get_value(
                 "Sales Order", self.sales_order, "custom_order_number"
             )
             self.custom_order_number = order_number or ""
+
+        # Always fetch company from SO
+        if self.sales_order:
+            self.company = frappe.db.get_value(
+                "Sales Order", self.sales_order, "company"
+            )
 
     def _resolve_payment_accounts(self):
         """For each cost item, resolve the payment account from Mode of Payment."""
@@ -61,11 +85,7 @@ class SalesOrderCost(Document):
                 item.payment_account = None
                 continue
 
-            account = frappe.db.get_value(
-                "Mode of Payment Account",
-                {"parent": item.mode_of_payment, "company": self.company},
-                "default_account",
-            )
+            account = _get_payment_account(item.mode_of_payment, self.company)
 
             if account:
                 item.payment_account = account
@@ -138,3 +158,52 @@ class SalesOrderCost(Document):
                 ),
                 message=frappe.get_traceback(with_context=True),
             )
+
+
+# ---------------------------------------------------------------------------
+# Whitelisted utility — called from client JS for payment account lookup
+# ---------------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def get_payment_account(mode_of_payment, company):
+    """Return the default account for a Mode of Payment in a given company.
+
+    This is a whitelisted wrapper because ``frappe.client.get_value``
+    does not reliably query child tables.
+    """
+    account = _get_payment_account(mode_of_payment, company)
+    return {"payment_account": account or ""}
+
+
+@frappe.whitelist()
+def get_sales_order_from_order_number(order_number):
+    """Look up a Sales Order by its custom_order_number field.
+
+    Returns the SO name and company, or empty values if not found.
+    """
+    result = frappe.db.get_value(
+        "Sales Order",
+        {"custom_order_number": order_number},
+        ["name", "company"],
+        as_dict=True,
+    )
+    if result:
+        return {"sales_order": result.name, "company": result.company}
+    return {"sales_order": "", "company": ""}
+
+
+def _get_payment_account(mode_of_payment, company):
+    """Internal helper — query Mode of Payment Account child table."""
+    if not mode_of_payment or not company:
+        return None
+
+    return frappe.db.get_value(
+        "Mode of Payment Account",
+        {
+            "parent": mode_of_payment,
+            "parenttype": "Mode of Payment",
+            "company": company,
+        },
+        "default_account",
+    )

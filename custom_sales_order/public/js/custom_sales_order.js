@@ -18,6 +18,19 @@ frappe.ui.form.on("Sales Order", {
 
         if (frm.is_new()) return;
 
+        // ── "Sales Order Cost" in the standard Create dropdown ──
+        frm.add_custom_button(
+            __("Sales Order Cost"),
+            function () {
+                frappe.new_doc("Sales Order Cost", {
+                    sales_order: frm.doc.name,
+                    company: frm.doc.company,
+                    custom_order_number: frm.doc.custom_order_number || "",
+                });
+            },
+            __("Create")
+        );
+
         // ── "View COGS Entry" button ──
         if (frm.doc.custom_cogs_journal_entry) {
             frm.add_custom_button(
@@ -32,19 +45,6 @@ frappe.ui.form.on("Sales Order", {
                 __("COGS")
             );
         }
-
-        // ── "Create Sales Order Cost" button ──
-        frm.add_custom_button(
-            __("Create Sales Order Cost"),
-            function () {
-                frappe.new_doc("Sales Order Cost", {
-                    sales_order: frm.doc.name,
-                    company: frm.doc.company,
-                    custom_order_number: frm.doc.custom_order_number || "",
-                });
-            },
-            __("COGS")
-        );
 
         // ── "View Costs" button ──
         frm.add_custom_button(

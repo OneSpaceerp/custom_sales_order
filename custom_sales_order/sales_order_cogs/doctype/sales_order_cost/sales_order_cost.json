@@ -7,8 +7,8 @@
   "engine": "InnoDB",
   "field_order": [
     "naming_series",
-    "sales_order",
     "custom_order_number",
+    "sales_order",
     "company",
     "column_break_header",
     "posting_date",
@@ -33,20 +33,20 @@
       "fieldtype": "Link",
       "label": "Sales Order",
       "options": "Sales Order",
-      "reqd": 1,
       "in_list_view": 1,
       "in_standard_filter": 1,
-      "search_index": 1
+      "search_index": 1,
+      "description": "Auto-filled from Order Number, or select directly."
     },
     {
       "fieldname": "custom_order_number",
       "fieldtype": "Data",
       "label": "Order Number",
-      "read_only": 1,
+      "reqd": 1,
       "in_list_view": 1,
       "in_standard_filter": 1,
       "search_index": 1,
-      "description": "Fetched from the Sales Order's Order Number field."
+      "description": "Enter the Order Number to auto-link the Sales Order."
     },
     {
       "fieldname": "company",

@@ -14,8 +14,40 @@ frappe.ui.form.on("Sales Order Cost", {
         }
     },
 
+    // When user types an Order Number, auto-fetch the Sales Order
+    custom_order_number: function (frm) {
+        if (frm.doc.custom_order_number) {
+            frappe.call({
+                method: "custom_sales_order.sales_order_cogs.doctype.sales_order_cost.sales_order_cost.get_sales_order_from_order_number",
+                args: {
+                    order_number: frm.doc.custom_order_number,
+                },
+                callback: function (r) {
+                    if (r.message && r.message.sales_order) {
+                        frm.set_value("sales_order", r.message.sales_order);
+                        frm.set_value("company", r.message.company);
+                    } else {
+                        frm.set_value("sales_order", "");
+                        frm.set_value("company", "");
+                        frappe.msgprint({
+                            title: __("Sales Order Not Found"),
+                            message: __(
+                                "No Sales Order found with Order Number '{0}'.",
+                                [frm.doc.custom_order_number]
+                            ),
+                            indicator: "red",
+                        });
+                    }
+                },
+            });
+        } else {
+            frm.set_value("sales_order", "");
+            frm.set_value("company", "");
+        }
+    },
+
+    // When user selects a Sales Order directly, fetch the order number
     sales_order: function (frm) {
-        // Auto-fetch company and order number from the Sales Order
         if (frm.doc.sales_order) {
             frappe.db.get_value(
                 "Sales Order",
@@ -24,13 +56,15 @@ frappe.ui.form.on("Sales Order Cost", {
                 function (r) {
                     if (r) {
                         frm.set_value("company", r.company || "");
-                        frm.set_value("custom_order_number", r.custom_order_number || "");
+                        if (!frm.doc.custom_order_number) {
+                            frm.set_value(
+                                "custom_order_number",
+                                r.custom_order_number || ""
+                            );
+                        }
                     }
                 }
             );
-        } else {
-            frm.set_value("company", "");
-            frm.set_value("custom_order_number", "");
         }
     },
 });
@@ -41,29 +75,26 @@ frappe.ui.form.on("Sales Order Cost Item", {
         let row = locals[cdt][cdn];
         if (row.mode_of_payment && frm.doc.company) {
             frappe.call({
-                method: "frappe.client.get_value",
+                method: "custom_sales_order.sales_order_cogs.doctype.sales_order_cost.sales_order_cost.get_payment_account",
                 args: {
-                    doctype: "Mode of Payment Account",
-                    filters: {
-                        parent: row.mode_of_payment,
-                        company: frm.doc.company,
-                    },
-                    fieldname: "default_account",
+                    mode_of_payment: row.mode_of_payment,
+                    company: frm.doc.company,
                 },
                 callback: function (r) {
-                    if (r.message && r.message.default_account) {
+                    if (r.message && r.message.payment_account) {
                         frappe.model.set_value(
                             cdt,
                             cdn,
                             "payment_account",
-                            r.message.default_account
+                            r.message.payment_account
                         );
                     } else {
                         frappe.model.set_value(cdt, cdn, "payment_account", "");
                         frappe.msgprint({
                             title: __("Payment Account Not Found"),
                             message: __(
-                                "No default account configured for Mode of Payment '{0}' in company '{1}'.",
+                                "No default account configured for Mode of Payment '{0}' in company '{1}'. " +
+                                "Please set it up in the Mode of Payment master.",
                                 [row.mode_of_payment, frm.doc.company]
                             ),
                             indicator: "orange",
