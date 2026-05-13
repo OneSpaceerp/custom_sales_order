@@ -1,0 +1,22 @@
+[project]
+name = "custom_sales_order"
+version = "1.0.0"
+description = "Dynamic COGS Engine — posts Journal Entries from Sales Order cost fields"
+authors = [{name = "Nest Software Development", email = "dev@nestsoftware.com"}]
+license = {text = "MIT"}
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = []
+
+[build-system]
+requires = ["flit_core>=3.4"]
+build-backend = "flit_core:buildapi"
+
+[tool.bench]
+app-name = "custom_sales_order"
+app-title = "Custom Sales Order COGS"
+app-publisher = "Nest Software Development"
+app-description = "Dynamic COGS Engine — posts Journal Entries from Sales Order cost fields"
+app-email = "dev@nestsoftware.com"
+app-license = "MIT"
+required-apps = ["frappe", "erpnext"]

@@ -1,0 +1,1 @@
+custom_sales_order.patches.v1_0.setup_settings

@@ -1,0 +1,14 @@
+[
+  {
+    "doctype": "Custom Field",
+    "dt": "Sales Order",
+    "fieldname": "custom_cogs_journal_entry",
+    "fieldtype": "Link",
+    "options": "Journal Entry",
+    "label": "COGS Journal Entry",
+    "read_only": 1,
+    "insert_after": "custom_is_compleated",
+    "module": "Sales Order COGS",
+    "translatable": 0
+  }
+]

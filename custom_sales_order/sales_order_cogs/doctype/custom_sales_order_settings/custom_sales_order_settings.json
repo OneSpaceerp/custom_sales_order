@@ -1,0 +1,77 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "creation": "2026-01-01 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "gl_section",
+    "cogs_account",
+    "cost_clearing_account",
+    "column_break_1",
+    "enable_cogs_je",
+    "warn_on_zero_actual_complete"
+  ],
+  "fields": [
+    {
+      "fieldname": "gl_section",
+      "fieldtype": "Section Break",
+      "label": "GL Account Configuration"
+    },
+    {
+      "fieldname": "cogs_account",
+      "fieldtype": "Link",
+      "label": "COGS Account",
+      "options": "Account",
+      "reqd": 1,
+      "description": "The expense account to debit for cost of goods sold."
+    },
+    {
+      "fieldname": "cost_clearing_account",
+      "fieldtype": "Link",
+      "label": "Cost Clearing Account",
+      "options": "Account",
+      "reqd": 1,
+      "description": "The account to credit as the offset for the COGS debit (e.g., GRNI or Cost Clearing)."
+    },
+    {
+      "fieldname": "column_break_1",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "1",
+      "fieldname": "enable_cogs_je",
+      "fieldtype": "Check",
+      "label": "Enable COGS Journal Entry Posting",
+      "description": "Master switch. Uncheck to disable all automatic COGS JE creation."
+    },
+    {
+      "default": "1",
+      "fieldname": "warn_on_zero_actual_complete",
+      "fieldtype": "Check",
+      "label": "Warn When Completed Order Has Zero Actual Cost"
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "issingle": 1,
+  "links": [],
+  "modified": "2026-01-01 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Sales Order COGS",
+  "name": "Custom Sales Order Settings",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1
+    },
+    {
+      "role": "Accounts Manager",
+      "read": 1,
+      "write": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC"
+}
