@@ -13,54 +13,54 @@ frappe.ui.form.on("Sales Order Cost", {
             );
         }
 
-        // View linked Journal Entry
-        if (frm.doc.cogs_journal_entry) {
+        // Check if any cost item has a JE linked
+        let has_journal_entries = (frm.doc.cost_items || []).some(
+            (row) => row.journal_entry
+        );
+
+        // View linked Journal Entries
+        if (has_journal_entries) {
             frm.add_custom_button(
-                __("View Journal Entry"),
+                __("View Journal Entries"),
                 function () {
-                    frappe.set_route(
-                        "Form",
-                        "Journal Entry",
-                        frm.doc.cogs_journal_entry
-                    );
+                    // Collect all JE names from child rows
+                    let je_names = (frm.doc.cost_items || [])
+                        .filter((row) => row.journal_entry)
+                        .map((row) => row.journal_entry);
+                    frappe.set_route("List", "Journal Entry", {
+                        name: ["in", je_names],
+                    });
                 }
             );
         }
 
-        // "Generate Journal Entry" button — only on saved documents
+        // "Generate Journal Entries" button — only on saved documents
         if (!frm.is_new()) {
             frm.add_custom_button(
-                __("Generate Journal Entry"),
+                __("Generate Journal Entries"),
                 function () {
-                    let action_label = frm.doc.cogs_journal_entry
+                    let action_label = has_journal_entries
                         ? __(
-                              "This will cancel the existing Journal Entry ({0}) and create a new one. Continue?",
-                              [frm.doc.cogs_journal_entry]
+                              "This will cancel all existing Journal Entries and create new ones for each cost item. Continue?"
                           )
                         : __(
-                              "This will create a COGS Journal Entry from the cost items. Continue?"
+                              "This will create a Journal Entry for each cost item row, using its date as the posting date. Continue?"
                           );
 
                     frappe.confirm(action_label, function () {
                         frm.call("generate_journal_entry").then(function (r) {
-                            if (r && r.message && r.message.je) {
+                            if (r && r.message && r.message.count > 0) {
                                 frappe.show_alert({
                                     message: __(
-                                        "Journal Entry {0} created successfully.",
-                                        [
-                                            '<a href="/app/journal-entry/' +
-                                                r.message.je +
-                                                '">' +
-                                                r.message.je +
-                                                "</a>",
-                                        ]
+                                        "{0} Journal Entries created successfully.",
+                                        [r.message.count]
                                     ),
                                     indicator: "green",
                                 });
                             } else {
                                 frappe.show_alert({
                                     message: __(
-                                        "No Journal Entry was created. Please check settings and cost items."
+                                        "No Journal Entries were created. Please check settings and cost items."
                                     ),
                                     indicator: "orange",
                                 });
@@ -69,13 +69,13 @@ frappe.ui.form.on("Sales Order Cost", {
                         });
                     });
                 },
-                frm.doc.cogs_journal_entry ? __("Actions") : null
+                has_journal_entries ? __("Actions") : null
             );
 
             // Make the primary action button stand out
-            if (!frm.doc.cogs_journal_entry) {
+            if (!has_journal_entries) {
                 frm.change_custom_button_type(
-                    __("Generate Journal Entry"),
+                    __("Generate Journal Entries"),
                     null,
                     "primary"
                 );

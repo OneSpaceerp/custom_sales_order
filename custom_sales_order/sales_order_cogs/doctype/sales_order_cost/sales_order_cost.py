@@ -9,9 +9,8 @@ A single Sales Order Cost document holds multiple cost line items
 the linked Sales Order's ``custom_actual_cost`` is recalculated as the sum
 of all cost items across all Sales Order Cost documents for that SO.
 
-The Journal Entry is generated directly from this document, with:
-  - Debit: COGS Account (from settings) for the total amount
-  - Credit: Grouped by payment account (from Mode of Payment per company)
+Journal Entries are generated **per cost item row** — each row gets its own
+JE using the row's ``cost_date`` as the posting date.
 """
 
 import frappe
@@ -40,8 +39,8 @@ class SalesOrderCost(Document):
         self._sync_actual_cost()
 
     def on_trash(self):
-        """Cancel linked JE and sync SO actual cost when this document is deleted."""
-        self._cancel_journal_entry()
+        """Cancel all linked JEs and sync SO actual cost when this document is deleted."""
+        self._cancel_all_journal_entries()
         self._sync_actual_cost(exclude_self=True)
 
     # ------------------------------------------------------------------
@@ -50,13 +49,20 @@ class SalesOrderCost(Document):
 
     @frappe.whitelist()
     def generate_journal_entry(self):
-        """Create (or recreate) the COGS Journal Entry from this document's cost items.
+        """Create one JE per cost item row, using each row's date as posting date.
 
         Called via ``frm.call("generate_journal_entry")`` from the client.
         """
-        self._create_journal_entry()
+        self._create_journal_entries()
         frappe.db.commit()
-        return {"je": self.cogs_journal_entry}
+
+        # Collect all created JE names for the response
+        je_names = [
+            item.journal_entry
+            for item in self.cost_items
+            if item.journal_entry
+        ]
+        return {"journal_entries": je_names, "count": len(je_names)}
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -178,11 +184,13 @@ class SalesOrderCost(Document):
                 message=frappe.get_traceback(with_context=True),
             )
 
-    def _create_journal_entry(self):
-        """Create the COGS Journal Entry from this document's cost items.
+    def _create_journal_entries(self):
+        """Create one JE per cost item row, each with its own posting date.
 
-        - Debit: COGS Account for the total amount
-        - Credit: One line per distinct payment account, grouped and summed
+        Each JE has:
+        - Debit: COGS Account for the row's amount
+        - Credit: Row's payment account (or fallback clearing account)
+        - Posting date: Row's cost_date
         """
         # 1. Read settings
         settings = frappe.get_single("Custom Sales Order Settings")
@@ -198,50 +206,26 @@ class SalesOrderCost(Document):
             frappe.throw(
                 _(
                     "COGS Account is not configured in Custom Sales Order Settings. "
-                    "Please set it before generating a Journal Entry."
+                    "Please set it before generating Journal Entries."
                 )
             )
 
         if not self.cost_items or len(self.cost_items) == 0:
             frappe.throw(_("No cost items found. Please add cost items first."))
 
-        total_amount = flt(self.total_amount, 2)
-        if total_amount <= 0:
-            frappe.throw(_("Total amount must be greater than zero."))
+        # 2. Cancel all existing JEs first
+        self._cancel_all_journal_entries()
 
-        # 2. Cancel old JE if present
-        self._cancel_journal_entry()
-
-        # 3. Build the Journal Entry
-        je = frappe.new_doc("Journal Entry")
-        je.posting_date = self.posting_date
-        je.company = self.company
-
-        # Build remark from cost item descriptions
-        remark_parts = []
+        # 3. Create one JE per cost item row
+        created_count = 0
         for item in self.cost_items:
-            desc = item.description or item.mode_of_payment or "Cost"
-            remark_parts.append(f"{desc}: {flt(item.amount, 2)}")
-        remark = " | ".join(remark_parts)
-        je.user_remark = _("COGS for SO {0} — {1} | {2}").format(
-            self.sales_order or "", self.name, remark
-        )
+            amount = flt(item.amount, 2)
+            if amount <= 0:
+                continue
 
-        # --- DEBIT side: COGS Account for the total ---
-        je.append(
-            "accounts",
-            {
-                "account": settings.cogs_account,
-                "debit_in_account_currency": total_amount,
-                "credit_in_account_currency": 0,
-            },
-        )
-
-        # --- CREDIT side: grouped by payment account ---
-        account_totals = {}
-        for item in self.cost_items:
-            acct = item.payment_account or settings.cost_clearing_account
-            if not acct:
+            # Determine the credit account
+            credit_account = item.payment_account or settings.cost_clearing_account
+            if not credit_account:
                 frappe.throw(
                     _(
                         "Row {0} ('{1}'): No payment account and no Cost Clearing "
@@ -249,68 +233,104 @@ class SalesOrderCost(Document):
                         "Account or set a fallback in Settings."
                     ).format(item.idx, item.description or "Unnamed")
                 )
-            account_totals[acct] = flt(
-                account_totals.get(acct, 0) + flt(item.amount), 2
+
+            # Build the JE
+            je = frappe.new_doc("Journal Entry")
+            je.posting_date = item.cost_date
+            je.company = self.company
+            je.user_remark = _("COGS for SO {0} — {1} | Row {2}: {3}").format(
+                self.sales_order or "",
+                self.name,
+                item.idx,
+                item.description or item.mode_of_payment or "Cost",
             )
 
-        for acct, amount in account_totals.items():
+            # DEBIT: COGS Account
             je.append(
                 "accounts",
                 {
-                    "account": acct,
+                    "account": settings.cogs_account,
+                    "debit_in_account_currency": amount,
+                    "credit_in_account_currency": 0,
+                },
+            )
+
+            # CREDIT: Payment Account
+            je.append(
+                "accounts",
+                {
+                    "account": credit_account,
                     "debit_in_account_currency": 0,
                     "credit_in_account_currency": amount,
                 },
             )
 
-        je.insert(ignore_permissions=True)
-        je.submit()
+            je.insert(ignore_permissions=True)
+            je.submit()
 
-        logger.info(
-            "Created COGS JE %s (amount=%s) from %s for SO %s",
-            je.name,
-            total_amount,
-            self.name,
-            self.sales_order,
-        )
-
-        # 4. Link the JE to this document and to the SO
-        self.db_set("cogs_journal_entry", je.name, update_modified=False)
-        self.cogs_journal_entry = je.name
-
-        if self.sales_order:
+            # Link the JE back to the child row
             frappe.db.set_value(
-                "Sales Order",
-                self.sales_order,
-                "custom_cogs_journal_entry",
+                "Sales Order Cost Item",
+                item.name,
+                "journal_entry",
                 je.name,
                 update_modified=False,
             )
+            item.journal_entry = je.name
+            created_count += 1
 
-    def _cancel_journal_entry(self):
-        """Cancel the linked Journal Entry if it exists and is submitted."""
-        je_name = self.cogs_journal_entry
-        if not je_name:
-            return
+            logger.info(
+                "Created JE %s (amount=%s, date=%s) for row %s of %s",
+                je.name,
+                amount,
+                item.cost_date,
+                item.idx,
+                self.name,
+            )
 
-        if frappe.db.exists("Journal Entry", je_name):
-            je_doc = frappe.get_doc("Journal Entry", je_name)
-            if je_doc.docstatus == 1:
-                je_doc.cancel()
-                logger.info(
-                    "Cancelled JE %s from %s", je_name, self.name
-                )
+        # 4. Store the last JE on the parent for quick reference
+        if created_count > 0:
+            last_je = self.cost_items[-1].journal_entry if self.cost_items else None
+            self.db_set("cogs_journal_entry", last_je, update_modified=False)
+            self.cogs_journal_entry = last_je
 
+        frappe.msgprint(
+            _("{0} Journal Entries created successfully.").format(created_count),
+            indicator="green",
+        )
+
+    def _cancel_all_journal_entries(self):
+        """Cancel all JEs linked to cost item rows in this document."""
+        for item in (self.cost_items or []):
+            je_name = item.journal_entry
+            if not je_name:
+                continue
+
+            if frappe.db.exists("Journal Entry", je_name):
+                je_doc = frappe.get_doc("Journal Entry", je_name)
+                if je_doc.docstatus == 1:
+                    je_doc.cancel()
+                    logger.info("Cancelled JE %s from %s row %s", je_name, self.name, item.idx)
+
+            frappe.db.set_value(
+                "Sales Order Cost Item",
+                item.name,
+                "journal_entry",
+                None,
+                update_modified=False,
+            )
+            item.journal_entry = None
+
+        # Clear the parent reference too
         self.db_set("cogs_journal_entry", None, update_modified=False)
         self.cogs_journal_entry = None
 
-        # Clear SO link too
+        # Clear SO link
         if self.sales_order:
-            # Only clear if the SO still points to this JE
             so_je = frappe.db.get_value(
                 "Sales Order", self.sales_order, "custom_cogs_journal_entry"
             )
-            if so_je == je_name:
+            if so_je:
                 frappe.db.set_value(
                     "Sales Order",
                     self.sales_order,
