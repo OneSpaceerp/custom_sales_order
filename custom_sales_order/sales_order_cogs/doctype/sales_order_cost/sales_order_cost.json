@@ -12,6 +12,7 @@
     "company",
     "column_break_header",
     "posting_date",
+    "cogs_journal_entry",
     "total_amount",
     "section_break_items",
     "cost_items",
@@ -68,6 +69,15 @@
       "label": "Posting Date",
       "reqd": 1,
       "default": "Today"
+    },
+    {
+      "fieldname": "cogs_journal_entry",
+      "fieldtype": "Link",
+      "label": "Journal Entry",
+      "options": "Journal Entry",
+      "read_only": 1,
+      "no_copy": 1,
+      "description": "Auto-created when you generate the COGS Journal Entry."
     },
     {
       "fieldname": "total_amount",

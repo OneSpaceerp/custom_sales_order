@@ -12,6 +12,75 @@ frappe.ui.form.on("Sales Order Cost", {
                 }
             );
         }
+
+        // View linked Journal Entry
+        if (frm.doc.cogs_journal_entry) {
+            frm.add_custom_button(
+                __("View Journal Entry"),
+                function () {
+                    frappe.set_route(
+                        "Form",
+                        "Journal Entry",
+                        frm.doc.cogs_journal_entry
+                    );
+                }
+            );
+        }
+
+        // "Generate Journal Entry" button — only on saved documents
+        if (!frm.is_new()) {
+            frm.add_custom_button(
+                __("Generate Journal Entry"),
+                function () {
+                    let action_label = frm.doc.cogs_journal_entry
+                        ? __(
+                              "This will cancel the existing Journal Entry ({0}) and create a new one. Continue?",
+                              [frm.doc.cogs_journal_entry]
+                          )
+                        : __(
+                              "This will create a COGS Journal Entry from the cost items. Continue?"
+                          );
+
+                    frappe.confirm(action_label, function () {
+                        frm.call("generate_journal_entry").then(function (r) {
+                            if (r && r.message && r.message.je) {
+                                frappe.show_alert({
+                                    message: __(
+                                        "Journal Entry {0} created successfully.",
+                                        [
+                                            '<a href="/app/journal-entry/' +
+                                                r.message.je +
+                                                '">' +
+                                                r.message.je +
+                                                "</a>",
+                                        ]
+                                    ),
+                                    indicator: "green",
+                                });
+                            } else {
+                                frappe.show_alert({
+                                    message: __(
+                                        "No Journal Entry was created. Please check settings and cost items."
+                                    ),
+                                    indicator: "orange",
+                                });
+                            }
+                            frm.reload_doc();
+                        });
+                    });
+                },
+                frm.doc.cogs_journal_entry ? __("Actions") : null
+            );
+
+            // Make the primary action button stand out
+            if (!frm.doc.cogs_journal_entry) {
+                frm.change_custom_button_type(
+                    __("Generate Journal Entry"),
+                    null,
+                    "primary"
+                );
+            }
+        }
     },
 
     // When user types an Order Number, auto-fetch the Sales Order
@@ -93,8 +162,7 @@ frappe.ui.form.on("Sales Order Cost Item", {
                         frappe.msgprint({
                             title: __("Payment Account Not Found"),
                             message: __(
-                                "No default account configured for Mode of Payment '{0}' in company '{1}'. " +
-                                "Please set it up in the Mode of Payment master.",
+                                "No default account configured for Mode of Payment '{0}' in company '{1}'.",
                                 [row.mode_of_payment, frm.doc.company]
                             ),
                             indicator: "orange",
