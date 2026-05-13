@@ -6,6 +6,7 @@ Sales Order COGS Summary — Script Report.
 
 Displays each Sales Order alongside its expected/actual costs, the COGS
 that would (or has been) posted, gross profit, and margin percentage.
+Now includes cost line count from the Sales Order Cost DocType.
 """
 
 import frappe
@@ -77,6 +78,12 @@ def _get_columns():
             "fieldtype": "Currency",
             "options": "Company:company:default_currency",
             "width": 130,
+        },
+        {
+            "fieldname": "cost_line_count",
+            "label": _("Cost Lines"),
+            "fieldtype": "Int",
+            "width": 90,
         },
         {
             "fieldname": "cogs_applied",
@@ -159,7 +166,17 @@ def _get_data(filters):
             COALESCE(so.custom_expected_cost, 0) AS expected_cost,
             COALESCE(so.custom_actual_cost, 0)   AS actual_cost,
             so.custom_is_compleated              AS is_completed,
-            so.custom_cogs_journal_entry         AS cogs_je
+            so.custom_cogs_journal_entry         AS cogs_je,
+            (
+                SELECT COUNT(*)
+                FROM `tabSales Order Cost` soc
+                WHERE soc.sales_order = so.name
+            ) AS cost_line_count,
+            (
+                SELECT COALESCE(SUM(soc.amount), 0)
+                FROM `tabSales Order Cost` soc
+                WHERE soc.sales_order = so.name
+            ) AS cost_line_total
         FROM `tabSales Order` so
         WHERE {where_clause}
         ORDER BY so.transaction_date DESC
@@ -170,9 +187,14 @@ def _get_data(filters):
 
     data = []
     for r in rows:
-        cogs = calculate_cogs(
-            flt(r.expected_cost), flt(r.actual_cost), bool(r.is_completed)
-        )
+        # Use cost line total if cost lines exist, otherwise use engine calculation
+        if r.cost_line_count and r.cost_line_count > 0:
+            cogs = flt(r.cost_line_total, 2)
+        else:
+            cogs = calculate_cogs(
+                flt(r.expected_cost), flt(r.actual_cost), bool(r.is_completed)
+            )
+
         revenue = flt(r.grand_total)
         profit = flt(revenue - cogs, 2)
         margin_pct = flt(profit / revenue * 100, 2) if revenue else 0
@@ -185,6 +207,7 @@ def _get_data(filters):
                 "grand_total": revenue,
                 "expected_cost": flt(r.expected_cost, 2),
                 "actual_cost": flt(r.actual_cost, 2),
+                "cost_line_count": r.cost_line_count or 0,
                 "cogs_applied": flt(cogs, 2),
                 "gross_profit": profit,
                 "margin_pct": margin_pct,

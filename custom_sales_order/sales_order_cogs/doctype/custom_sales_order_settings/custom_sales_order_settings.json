@@ -31,8 +31,8 @@
       "fieldtype": "Link",
       "label": "Cost Clearing Account",
       "options": "Account",
-      "reqd": 1,
-      "description": "The account to credit as the offset for the COGS debit (e.g., GRNI or Cost Clearing)."
+      "reqd": 0,
+      "description": "Fallback credit account used when a cost line has no Mode of Payment Account configured. Leave blank if all cost lines will have a Mode of Payment with a default account."
     },
     {
       "fieldname": "column_break_1",
