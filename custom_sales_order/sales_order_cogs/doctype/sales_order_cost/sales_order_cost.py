@@ -6,8 +6,8 @@ Sales Order Cost controller.
 
 A single Sales Order Cost document holds multiple cost line items
 (child table ``cost_items`` → Sales Order Cost Item). On every save/delete
-the linked Sales Order's ``custom_actual_cost`` is recalculated as the sum
-of all cost items across all Sales Order Cost documents for that SO.
+the actual cost is distributed **proportionally** across ALL Sales Orders
+sharing the same ``custom_order_number``, weighted by each SO's ``grand_total``.
 
 Journal Entries are generated **per cost item row** — each row gets its own
 JE using the row's ``cost_date`` as the posting date.
@@ -35,11 +35,11 @@ class SalesOrderCost(Document):
         self._compute_total()
 
     def on_update(self):
-        """Sync the SO's actual cost whenever this document is saved."""
+        """Sync actual cost across all SOs sharing this order number."""
         self._sync_actual_cost()
 
     def on_trash(self):
-        """Cancel all linked JEs and sync SO actual cost when this document is deleted."""
+        """Cancel all linked JEs and sync actual cost when deleted."""
         self._cancel_all_journal_entries()
         self._sync_actual_cost(exclude_self=True)
 
@@ -69,18 +69,24 @@ class SalesOrderCost(Document):
     # ------------------------------------------------------------------
 
     def _resolve_sales_order(self):
-        """If custom_order_number is set but sales_order is not, look up the SO.
-        If sales_order is set, fetch the order number from it.
+        """Look up Sales Orders by order number.
+
+        - If multiple SOs share the order number, store the first one in
+          ``sales_order`` for backward compat and filtering.
+        - If ``sales_order`` is set but ``custom_order_number`` is not,
+          fetch the order number from the SO.
         """
         if self.custom_order_number and not self.sales_order:
-            # Look up SO by custom_order_number
-            so_name = frappe.db.get_value(
+            # Find all SOs with this order number, pick the first
+            so_list = frappe.get_all(
                 "Sales Order",
-                {"custom_order_number": self.custom_order_number},
-                "name",
+                filters={"custom_order_number": self.custom_order_number},
+                fields=["name", "company"],
+                order_by="creation ASC",
+                limit_page_length=0,
             )
-            if so_name:
-                self.sales_order = so_name
+            if so_list:
+                self.sales_order = so_list[0].name
             else:
                 frappe.throw(
                     _("No Sales Order found with Order Number '{0}'.").format(
@@ -94,7 +100,7 @@ class SalesOrderCost(Document):
             )
             self.custom_order_number = order_number or ""
 
-        # Always fetch company from SO
+        # Always fetch company from the primary SO
         if self.sales_order:
             self.company = frappe.db.get_value(
                 "Sales Order", self.sales_order, "company"
@@ -133,8 +139,14 @@ class SalesOrderCost(Document):
         )
 
     def _sync_actual_cost(self, exclude_self=False):
-        """Update the Sales Order's custom_actual_cost with the sum of all
-        cost items across ALL Sales Order Cost documents for this SO.
+        """Distribute total costs proportionally across ALL Sales Orders
+        sharing the same ``custom_order_number``, weighted by ``grand_total``.
+
+        Example: Order 1316 has 3 SOs with grand_totals 20k, 15k, 10k.
+        Total cost = 30k.
+        SO1 gets 20/45 * 30k = 13,333.33
+        SO2 gets 15/45 * 30k = 10,000.00
+        SO3 gets 10/45 * 30k = 6,666.67
 
         Parameters
         ----------
@@ -142,44 +154,78 @@ class SalesOrderCost(Document):
             If True, exclude this document's total from the sum
             (used in on_trash before the record is deleted).
         """
-        if not self.sales_order:
+        if not self.custom_order_number:
             return
 
         try:
-            # Sum cost_items.amount from all Sales Order Cost docs for this SO
-            total = flt(
+            # 1. Get ALL SOs sharing this order number with their grand_totals
+            linked_sos = frappe.get_all(
+                "Sales Order",
+                filters={"custom_order_number": self.custom_order_number},
+                fields=["name", "grand_total"],
+                limit_page_length=0,
+            )
+
+            if not linked_sos:
+                return
+
+            # 2. Sum ALL cost items across ALL Sales Order Cost docs
+            #    with the same custom_order_number
+            total_cost = flt(
                 frappe.db.sql(
                     """
                     SELECT COALESCE(SUM(ci.amount), 0)
                     FROM `tabSales Order Cost Item` ci
                     INNER JOIN `tabSales Order Cost` sc ON sc.name = ci.parent
-                    WHERE sc.sales_order = %s
+                    WHERE sc.custom_order_number = %s
                     """,
-                    self.sales_order,
+                    self.custom_order_number,
                 )[0][0]
             )
 
             if exclude_self:
-                total = flt(total - flt(self.total_amount))
+                total_cost = flt(total_cost - flt(self.total_amount))
 
-            frappe.db.set_value(
-                "Sales Order",
-                self.sales_order,
-                "custom_actual_cost",
-                total,
-                update_modified=False,
-            )
+            # 3. Calculate total grand_total across all linked SOs
+            total_grand = sum(flt(so.grand_total) for so in linked_sos)
 
-            logger.info(
-                "Updated custom_actual_cost for SO %s to %s",
-                self.sales_order,
-                total,
-            )
+            # 4. Distribute proportionally
+            if total_grand > 0:
+                for so in linked_sos:
+                    proportion = flt(so.grand_total) / total_grand
+                    so_cost = flt(total_cost * proportion, 2)
+
+                    frappe.db.set_value(
+                        "Sales Order",
+                        so.name,
+                        "custom_actual_cost",
+                        so_cost,
+                        update_modified=False,
+                    )
+
+                    logger.info(
+                        "Distributed cost for SO %s: %s (%.1f%% of %s)",
+                        so.name,
+                        so_cost,
+                        proportion * 100,
+                        total_cost,
+                    )
+            else:
+                # All SOs have zero grand_total — split equally
+                equal_share = flt(total_cost / len(linked_sos), 2)
+                for so in linked_sos:
+                    frappe.db.set_value(
+                        "Sales Order",
+                        so.name,
+                        "custom_actual_cost",
+                        equal_share,
+                        update_modified=False,
+                    )
 
         except Exception:
             frappe.log_error(
-                title=_("Failed to sync actual cost for SO {0}").format(
-                    self.sales_order
+                title=_("Failed to sync actual cost for order number {0}").format(
+                    self.custom_order_number
                 ),
                 message=frappe.get_traceback(with_context=True),
             )
@@ -238,8 +284,10 @@ class SalesOrderCost(Document):
             je = frappe.new_doc("Journal Entry")
             je.posting_date = item.cost_date
             je.company = self.company
-            je.user_remark = _("COGS for SO {0} — {1} | Row {2}: {3}").format(
-                self.sales_order or "",
+            je.user_remark = _(
+                "COGS for Order #{0} — {1} | Row {2}: {3}"
+            ).format(
+                self.custom_order_number or "",
                 self.name,
                 item.idx,
                 item.description or item.mode_of_payment or "Cost",
@@ -310,7 +358,12 @@ class SalesOrderCost(Document):
                 je_doc = frappe.get_doc("Journal Entry", je_name)
                 if je_doc.docstatus == 1:
                     je_doc.cancel()
-                    logger.info("Cancelled JE %s from %s row %s", je_name, self.name, item.idx)
+                    logger.info(
+                        "Cancelled JE %s from %s row %s",
+                        je_name,
+                        self.name,
+                        item.idx,
+                    )
 
             frappe.db.set_value(
                 "Sales Order Cost Item",
@@ -324,20 +377,6 @@ class SalesOrderCost(Document):
         # Clear the parent reference too
         self.db_set("cogs_journal_entry", None, update_modified=False)
         self.cogs_journal_entry = None
-
-        # Clear SO link
-        if self.sales_order:
-            so_je = frappe.db.get_value(
-                "Sales Order", self.sales_order, "custom_cogs_journal_entry"
-            )
-            if so_je:
-                frappe.db.set_value(
-                    "Sales Order",
-                    self.sales_order,
-                    "custom_cogs_journal_entry",
-                    None,
-                    update_modified=False,
-                )
 
 
 # ---------------------------------------------------------------------------
@@ -358,19 +397,35 @@ def get_payment_account(mode_of_payment, company):
 
 @frappe.whitelist()
 def get_sales_order_from_order_number(order_number):
-    """Look up a Sales Order by its custom_order_number field.
+    """Look up ALL Sales Orders sharing a custom_order_number.
 
-    Returns the SO name and company, or empty values if not found.
+    Returns the primary SO (first by creation), company, and the full
+    list of linked SOs with their grand_totals for the distribution preview.
     """
-    result = frappe.db.get_value(
+    so_list = frappe.get_all(
         "Sales Order",
-        {"custom_order_number": order_number},
-        ["name", "company"],
-        as_dict=True,
+        filters={"custom_order_number": order_number},
+        fields=["name", "company", "grand_total", "customer_name"],
+        order_by="creation ASC",
+        limit_page_length=0,
     )
-    if result:
-        return {"sales_order": result.name, "company": result.company}
-    return {"sales_order": "", "company": ""}
+
+    if not so_list:
+        return {"sales_order": "", "company": "", "linked_orders": [], "count": 0}
+
+    return {
+        "sales_order": so_list[0].name,
+        "company": so_list[0].company,
+        "linked_orders": [
+            {
+                "name": so.name,
+                "grand_total": flt(so.grand_total),
+                "customer_name": so.customer_name or "",
+            }
+            for so in so_list
+        ],
+        "count": len(so_list),
+    }
 
 
 def _get_payment_account(mode_of_payment, company):

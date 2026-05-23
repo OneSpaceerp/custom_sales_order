@@ -3,6 +3,9 @@
 
 frappe.ui.form.on("Sales Order Cost", {
     refresh: function (frm) {
+        // Show linked Sales Orders distribution preview
+        _render_linked_sales_orders(frm);
+
         // Link back to the parent Sales Order
         if (frm.doc.sales_order) {
             frm.add_custom_button(
@@ -23,7 +26,6 @@ frappe.ui.form.on("Sales Order Cost", {
             frm.add_custom_button(
                 __("View Journal Entries"),
                 function () {
-                    // Collect all JE names from child rows
                     let je_names = (frm.doc.cost_items || [])
                         .filter((row) => row.journal_entry)
                         .map((row) => row.journal_entry);
@@ -83,7 +85,7 @@ frappe.ui.form.on("Sales Order Cost", {
         }
     },
 
-    // When user types an Order Number, auto-fetch the Sales Order
+    // When user types an Order Number, auto-fetch the Sales Order(s)
     custom_order_number: function (frm) {
         if (frm.doc.custom_order_number) {
             frappe.call({
@@ -95,9 +97,29 @@ frappe.ui.form.on("Sales Order Cost", {
                     if (r.message && r.message.sales_order) {
                         frm.set_value("sales_order", r.message.sales_order);
                         frm.set_value("company", r.message.company);
+
+                        // Store linked orders data for rendering
+                        frm._linked_orders = r.message.linked_orders || [];
+                        _render_linked_sales_orders(frm);
+
+                        // Show info about multiple SOs
+                        if (r.message.count > 1) {
+                            frappe.show_alert({
+                                message: __(
+                                    "Order #{0} is linked to {1} Sales Orders. Costs will be distributed proportionally by Grand Total.",
+                                    [
+                                        frm.doc.custom_order_number,
+                                        r.message.count,
+                                    ]
+                                ),
+                                indicator: "blue",
+                            });
+                        }
                     } else {
                         frm.set_value("sales_order", "");
                         frm.set_value("company", "");
+                        frm._linked_orders = [];
+                        _render_linked_sales_orders(frm);
                         frappe.msgprint({
                             title: __("Sales Order Not Found"),
                             message: __(
@@ -112,6 +134,8 @@ frappe.ui.form.on("Sales Order Cost", {
         } else {
             frm.set_value("sales_order", "");
             frm.set_value("company", "");
+            frm._linked_orders = [];
+            _render_linked_sales_orders(frm);
         }
     },
 
@@ -177,10 +201,12 @@ frappe.ui.form.on("Sales Order Cost Item", {
 
     amount: function (frm) {
         _compute_total(frm);
+        _render_linked_sales_orders(frm);
     },
 
     cost_items_remove: function (frm) {
         _compute_total(frm);
+        _render_linked_sales_orders(frm);
     },
 });
 
@@ -190,4 +216,102 @@ function _compute_total(frm) {
         total += flt(row.amount);
     });
     frm.set_value("total_amount", flt(total, 2));
+}
+
+/**
+ * Render the linked Sales Orders table showing proportional cost distribution.
+ * Fetches SO data from the server if not already cached.
+ */
+function _render_linked_sales_orders(frm) {
+    let wrapper = frm.fields_dict.linked_sales_orders;
+    if (!wrapper || !wrapper.$wrapper) return;
+
+    // If we don't have linked orders data yet, fetch it
+    if (!frm._linked_orders && frm.doc.custom_order_number) {
+        frappe.call({
+            method: "custom_sales_order.sales_order_cogs.doctype.sales_order_cost.sales_order_cost.get_sales_order_from_order_number",
+            args: { order_number: frm.doc.custom_order_number },
+            async: false,
+            callback: function (r) {
+                if (r.message) {
+                    frm._linked_orders = r.message.linked_orders || [];
+                }
+            },
+        });
+    }
+
+    let linked = frm._linked_orders || [];
+
+    // Only show if multiple SOs are linked
+    if (linked.length <= 1) {
+        wrapper.$wrapper.html("");
+        return;
+    }
+
+    let total_cost = flt(frm.doc.total_amount) || 0;
+    let total_grand = linked.reduce(
+        (sum, so) => sum + flt(so.grand_total),
+        0
+    );
+
+    let rows_html = linked
+        .map(function (so) {
+            let pct =
+                total_grand > 0
+                    ? ((flt(so.grand_total) / total_grand) * 100).toFixed(1)
+                    : (100 / linked.length).toFixed(1);
+            let allocated =
+                total_grand > 0
+                    ? ((flt(so.grand_total) / total_grand) * total_cost).toFixed(
+                          2
+                      )
+                    : (total_cost / linked.length).toFixed(2);
+
+            return (
+                "<tr>" +
+                '<td><a href="/app/sales-order/' +
+                so.name +
+                '">' +
+                so.name +
+                "</a></td>" +
+                "<td>" +
+                (so.customer_name || "-") +
+                "</td>" +
+                "<td class='text-right'>" +
+                format_currency(so.grand_total, frm.doc.currency) +
+                "</td>" +
+                "<td class='text-right'>" +
+                pct +
+                "%</td>" +
+                "<td class='text-right font-weight-bold'>" +
+                format_currency(allocated, frm.doc.currency) +
+                "</td>" +
+                "</tr>"
+            );
+        })
+        .join("");
+
+    let html =
+        '<div class="frappe-control" style="margin-top: 8px; margin-bottom: 8px;">' +
+        '<div class="alert alert-info" style="padding: 8px 12px; margin-bottom: 8px;">' +
+        '<strong>' + __("Multiple Sales Orders") + '</strong> — ' +
+        __("{0} Sales Orders share Order #{1}. Costs are distributed proportionally by Grand Total.", [
+            linked.length,
+            frm.doc.custom_order_number,
+        ]) +
+        "</div>" +
+        '<table class="table table-bordered table-sm" style="font-size: 12px;">' +
+        "<thead><tr>" +
+        "<th>" + __("Sales Order") + "</th>" +
+        "<th>" + __("Customer") + "</th>" +
+        '<th class="text-right">' + __("Grand Total") + "</th>" +
+        '<th class="text-right">' + __("Share %") + "</th>" +
+        '<th class="text-right">' + __("Allocated Cost") + "</th>" +
+        "</tr></thead>" +
+        "<tbody>" +
+        rows_html +
+        "</tbody>" +
+        "</table></div>";
+
+    wrapper.$wrapper.html(html);
 }

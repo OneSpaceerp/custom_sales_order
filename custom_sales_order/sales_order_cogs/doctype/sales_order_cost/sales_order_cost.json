@@ -9,6 +9,7 @@
     "naming_series",
     "custom_order_number",
     "sales_order",
+    "linked_sales_orders",
     "company",
     "column_break_header",
     "posting_date",
@@ -34,10 +35,16 @@
       "fieldtype": "Link",
       "label": "Sales Order",
       "options": "Sales Order",
+      "read_only": 1,
       "in_list_view": 1,
       "in_standard_filter": 1,
       "search_index": 1,
-      "description": "Auto-filled from Order Number, or select directly."
+      "description": "Primary Sales Order (auto-filled). Costs are distributed across all SOs with the same Order Number."
+    },
+    {
+      "fieldname": "linked_sales_orders",
+      "fieldtype": "HTML",
+      "label": "Linked Sales Orders"
     },
     {
       "fieldname": "custom_order_number",
